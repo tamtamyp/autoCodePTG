@@ -14,6 +14,18 @@ try:
 except AttributeError:
     pass
 
+# ==========================================
+# CẤU HÌNH CỐ ĐỊNH (HARDCODE)
+# ==========================================
+SERVER_ID = "2"
+GAME_CODE = "661"
+SHEET_URLS = ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"]
+# SHEET_URLS = [
+#     "https://docs.google.com/spreadsheets/d/1wIL_pO9wdZjq5TX4S-e_zYgo0_Zc3O0_EKcVUWlDmz4/edit?usp=sharing"
+#     ,"https://docs.google.com/spreadsheets/d/1s-K2MO92uzwkKSk7dZDo4vR6K7XicRvfIp63Vo7c-gA/edit?usp=sharing"
+# ]
+# ==========================================
+
 def get_google_sheet_roles(sheet_url):
     # Trích xuất Spreadsheet ID từ URL Google Sheet
     sheet_id_match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
@@ -54,14 +66,16 @@ class RedeemRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed_url = urlparse(self.path)
         if parsed_url.path == '/redeem':
-            # Lấy tham số qua Query String
+            # Lấy tham số qua Query String (Chỉ cần 'code')
             query_params = parse_qs(parsed_url.query)
-            gift_code = query_params.get("code", ["PTFENNECFOX"])[0]
-            server_id = query_params.get("serverId", ["2"])[0]
-            game_code = query_params.get("gameCode", ["661"])[0]
-            sheet_url = query_params.get("sheetUrl", [None])[0]
+            gift_codes = query_params.get("code", [])
+            gift_code = gift_codes[0].strip() if gift_codes else ""
             
-            self.process_redeem(gift_code, server_id, game_code, sheet_url)
+            if not gift_code:
+                self.send_error_response(400, "Thiếu tham số 'code' bắt buộc.")
+                return
+            
+            self.process_redeem(gift_code)
         else:
             self.send_error_response(404, "Endpoint not found. Use GET or POST to /redeem")
 
@@ -77,27 +91,24 @@ class RedeemRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 params = {}
 
-            gift_code = params.get("code", "PTFENNECFOX")
-            server_id = params.get("serverId", "2")
-            game_code = params.get("gameCode", "661")
-            sheet_url = params.get("sheetUrl", None)
+            gift_code = params.get("code", "")
+            if isinstance(gift_code, str):
+                gift_code = gift_code.strip()
+            else:
+                gift_code = ""
             
-            self.process_redeem(gift_code, server_id, game_code, sheet_url)
+            if not gift_code:
+                self.send_error_response(400, "Thiếu tham số 'code' bắt buộc.")
+                return
+            
+            self.process_redeem(gift_code)
         else:
             self.send_error_response(404, "Endpoint not found. Use GET or POST to /redeem")
 
-    def process_redeem(self, gift_code, server_id, game_code, sheet_url=None):
+    def process_redeem(self, gift_code):
         role_ids = []
-        if sheet_url:
-            # sheet_url có thể là một URL (str) hoặc một danh sách các URL (list)
-            if isinstance(sheet_url, str):
-                sheet_urls = [sheet_url]
-            elif isinstance(sheet_url, list):
-                sheet_urls = sheet_url
-            else:
-                sheet_urls = []
-
-            for s_url in sheet_urls:
+        if SHEET_URLS:
+            for s_url in SHEET_URLS:
                 s_url = str(s_url).strip()
                 if not s_url:
                     continue
@@ -111,7 +122,7 @@ class RedeemRequestHandler(BaseHTTPRequestHandler):
         else:
             excel_path = "idacc.xlsx"
             if not os.path.exists(excel_path):
-                self.send_error_response(404, f"Không tìm thấy file Excel: {excel_path} và không truyền sheetUrl")
+                self.send_error_response(404, f"Không tìm thấy file Excel: {excel_path} và không cấu hình SHEET_URLS")
                 return
 
             print(f"\n[+] Đang đọc dữ liệu từ file Excel cục bộ: {excel_path}...")
@@ -152,8 +163,8 @@ class RedeemRequestHandler(BaseHTTPRequestHandler):
             print(f"    [{idx}/{len(role_ids)}] Đang redeem cho {role_id}...")
             
             payload = {
-                "serverId": str(server_id),
-                "gameCode": str(game_code),
+                "serverId": str(SERVER_ID),
+                "gameCode": str(GAME_CODE),
                 "roleId": role_id,
                 "roleName": role_id,
                 "code": gift_code
@@ -161,42 +172,45 @@ class RedeemRequestHandler(BaseHTTPRequestHandler):
 
             try:
                 response = requests.post(api_url, headers=headers, json=payload, timeout=10)
+                status_code = response.status_code
                 
-                if response.status_code == 200:
-                    try:
-                        res_json = response.json()
-                        error_code = res_json.get("errorCode")
-                        
-                        # errorCode == 1 là thành công, ngược lại là thất bại
-                        if error_code == 1:
-                            success_list.append({
-                                "roleId": role_id
-                            })
-                            print(f"        -> THÀNH CÔNG: {res_json.get('message', 'Success')}")
-                        else:
-                            failed_list.append({
-                                "roleId": role_id,
-                                "response": res_json
-                            })
-                            print(f"        -> THẤT BẠI: Code {error_code} - {res_json.get('message', 'Failed')}")
-                    except Exception:
-                        # Trường hợp phản hồi không phải JSON hợp lệ
-                        err_msg = f"Phản hồi không phải JSON: {response.text}"
-                        failed_list.append({
+                # Thử giải mã JSON phản hồi (cho cả 200 và các mã lỗi như 400)
+                try:
+                    res_json = response.json()
+                    error_code = res_json.get("errorCode")
+                    error_msg = res_json.get("message") or res_json.get("description")
+                    
+                    if status_code == 200 and error_code == 1:
+                        success_list.append({
                             "roleId": role_id
                         })
-                        print(f"        -> THẤT BẠI: {err_msg}")
-                else:
-                    err_msg = f"HTTP Error Status {response.status_code}: {response.text}"
+                        print(f"        -> THÀNH CÔNG: {error_msg or 'Success'}")
+                    else:
+                        # Thất bại từ API VNG
+                        msg = error_msg or f"Lỗi code {error_code}"
+                        failed_list.append({
+                            "roleId": role_id,
+                            "error": msg
+                        })
+                        print(f"        -> THẤT BẠI: {msg}")
+                except Exception:
+                    # Trường hợp phản hồi không phải JSON
+                    if status_code == 200:
+                        err_msg = f"Phản hồi không phải JSON: {response.text}"
+                    else:
+                        err_msg = f"HTTP Status {status_code}: {response.text}"
+                        
                     failed_list.append({
-                        "roleId": role_id
+                        "roleId": role_id,
+                        "error": err_msg
                     })
                     print(f"        -> THẤT BẠI: {err_msg}")
 
             except Exception as e:
                 err_msg = f"Lỗi kết nối API: {str(e)}"
                 failed_list.append({
-                    "roleId": role_id
+                    "roleId": role_id,
+                    "error": err_msg
                 })
                 print(f"        -> LỖI KẾT NỐI: {str(e)}")
 
