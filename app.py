@@ -17,7 +17,7 @@ except AttributeError:
 # ==============================================================================
 # CẤU HÌNH ZALO BOT & VNG REDEEM
 # ==============================================================================
-BOT_TOKEN = "121790275844508830:NElOYlYaiBdSnwBdvmlLgQMZlXgniyhHzsJafSRmgEjfABxUhHXDWhBPeCkvMRop"      # Token nhận từ bot.zaloplatforms.com
+BOT_TOKEN = "1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex"      # Token nhận từ bot.zaloplatforms.com
 SECRET_TOKEN = "abc-xyz-123" # Secret token cấu hình khi setWebhook (tùy chọn)
 
 SERVER_ID = "2"
@@ -201,12 +201,10 @@ class ZaloWebhookRequestHandler(BaseHTTPRequestHandler):
                 sender_id = data.get("sender", {}).get("id")
                 message_text = data.get("message", {}).get("text", "").strip()
                 
-                # Cú pháp hỗ trợ: "/code <MÃ_CODE>" hoặc "/redeem <MÃ_CODE>"
+                # Cú pháp hỗ trợ: "!code <MÃ_CODE>"
                 gift_code = ""
-                if message_text.lower().startswith("/code "):
+                if message_text.lower().startswith("!code "):
                     gift_code = message_text[6:].strip()
-                elif message_text.lower().startswith("/redeem "):
-                    gift_code = message_text[8:].strip()
 
                 if gift_code and sender_id:
                     # Chạy xử lý trong luồng riêng để trả về 200 OK cho Zalo ngay lập tức (< 2 giây)
