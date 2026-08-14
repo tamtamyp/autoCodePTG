@@ -4,8 +4,8 @@ import time
 import json
 import re
 import csv
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse, parse_qs
 import requests
 import openpyxl
 
@@ -14,17 +14,21 @@ try:
 except AttributeError:
     pass
 
-# ==========================================
-# CẤU HÌNH CỐ ĐỊNH (HARDCODE)
-# ==========================================
+# ==============================================================================
+# CẤU HÌNH ZALO BOT & VNG REDEEM
+# ==============================================================================
+BOT_TOKEN = "121790275844508830:NElOYlYaiBdSnwBdvmlLgQMZlXgniyhHzsJafSRmgEjfABxUhHXDWhBPeCkvMRop"      # Token nhận từ bot.zaloplatforms.com
+SECRET_TOKEN = "abc-xyz-123" # Secret token cấu hình khi setWebhook (tùy chọn)
+
 SERVER_ID = "2"
 GAME_CODE = "661"
-SHEET_URLS = ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"]
-# SHEET_URLS = [
-#     "https://docs.google.com/spreadsheets/d/1wIL_pO9wdZjq5TX4S-e_zYgo0_Zc3O0_EKcVUWlDmz4/edit?usp=sharing"
-#     ,"https://docs.google.com/spreadsheets/d/1s-K2MO92uzwkKSk7dZDo4vR6K7XicRvfIp63Vo7c-gA/edit?usp=sharing"
-# ]
-# ==========================================
+SHEET_URLS = [
+    "https://docs.google.com/spreadsheets/d/1wIL_pO9wdZjq5TX4S-e_zYgo0_Zc3O0_EKcVUWlDmz4/edit?usp=sharing",
+    "https://docs.google.com/spreadsheets/d/1s-K2MO92uzwkKSk7dZDo4vR6K7XicRvfIp63Vo7c-gA/edit?usp=sharing"
+]
+PORT = int(os.environ.get("PORT", 5000))
+# ==============================================================================
+
 
 def get_google_sheet_roles(sheet_url):
     # Trích xuất Spreadsheet ID từ URL Google Sheet
@@ -58,194 +62,179 @@ def get_google_sheet_roles(sheet_url):
                     role_ids.append(val_str)
     return role_ids
 
-class RedeemRequestHandler(BaseHTTPRequestHandler):
+
+def send_zalo_message(chat_id, text):
+    """Gửi tin nhắn văn bản phản hồi lại người dùng thông qua API Zalo Bot Platform"""
+    if not BOT_TOKEN or "ĐIỀN_TOKEN" in BOT_TOKEN:
+        print(f"\n[Zalo Bot MOCK -> Gửi tới {chat_id}]:\n{text}\n")
+        return
+        
+    url = f"https://bot-api.zaloplatforms.com/bot{BOT_TOKEN}/sendMessage"
+    headers = {
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "chat_id": str(chat_id),
+        "text": text
+    }
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        print(f"[Zalo Bot] Phản hồi gửi tin nhắn: {res.status_code} - {res.text}")
+    except Exception as e:
+        print(f"[Zalo Bot] Lỗi khi gửi tin nhắn Zalo: {e}")
+
+
+def run_redeem_in_background(chat_id, gift_code):
+    """Luồng xử lý chạy ngầm tải Google Sheet, redeem code và trả kết quả về Zalo chat"""
+    role_ids = []
+    
+    # 1. Tải danh sách roleId từ Google Sheet
+    for s_url in SHEET_URLS:
+        s_url = s_url.strip()
+        if not s_url:
+            continue
+        try:
+            roles = get_google_sheet_roles(s_url)
+            role_ids.extend(roles)
+        except Exception as e:
+            send_zalo_message(chat_id, f"Lỗi tải Google Sheet ({s_url}): {str(e)}")
+            return
+            
+    # Loại bỏ các role ID trùng lặp
+    role_ids = list(dict.fromkeys(role_ids))
+    if not role_ids:
+        send_zalo_message(chat_id, "Không tìm thấy Role ID nào trong Google Sheets của bạn.")
+        return
+        
+    send_zalo_message(chat_id, f"Đang xử lý nạp code '{gift_code}' cho {len(role_ids)} tài khoản. Vui lòng đợi giây lát...")
+    
+    # 2. Thực hiện gọi API Redeem VNG
+    api_url = "https://vgrapi-sea.vnggames.com/coordinator/api/v1/code/redeem"
+    headers = {
+        "x-client-region": "VN",
+        "Content-Type": "application/json"
+    }
+
+    success_list = []
+    failed_list = []
+
+    for idx, role_id in enumerate(role_ids, 1):
+        payload = {
+            "serverId": str(SERVER_ID),
+            "gameCode": str(GAME_CODE),
+            "roleId": role_id,
+            "roleName": role_id,
+            "code": gift_code
+        }
+
+        try:
+            response = requests.post(api_url, headers=headers, json=payload, timeout=10)
+            status_code = response.status_code
+            
+            try:
+                res_json = response.json()
+                error_code = res_json.get("errorCode")
+                error_msg = res_json.get("message") or res_json.get("description")
+                
+                if status_code == 200 and error_code == 1:
+                    success_list.append(role_id)
+                else:
+                    msg = error_msg or f"Lỗi code {error_code}"
+                    failed_list.append((role_id, msg))
+            except Exception:
+                if status_code == 200:
+                    err_msg = f"Phản hồi không phải JSON: {response.text}"
+                else:
+                    err_msg = f"HTTP Status {status_code}: {response.text}"
+                failed_list.append((role_id, err_msg))
+        except Exception as e:
+            failed_list.append((role_id, f"Lỗi kết nối API: {str(e)}"))
+
+        # Tránh rate limiting của máy chủ
+        time.sleep(0.5)
+
+    # 3. Gửi tin nhắn thống kê kết quả về Zalo Chat
+    summary_text = (
+        f"KẾT QUẢ NẠP CODE: {gift_code}\n"
+        f"Thành công: {len(success_list)}\n"
+        f"Thất bại: {len(failed_list)}\n"
+    )
+    
+    if failed_list:
+        summary_text += "\nChi tiết lỗi:\n"
+        for role_id, err in failed_list:
+            summary_text += f"- {role_id}: {err}\n"
+            
+    send_zalo_message(chat_id, summary_text)
+
+
+class ZaloWebhookRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Override to log requests in a clean way
         print(f"[HTTP] {self.address_string()} - - [{self.log_date_time_string()}] {format%args}")
 
-    def do_GET(self):
-        parsed_url = urlparse(self.path)
-        if parsed_url.path == '/redeem':
-            # Lấy tham số qua Query String (Chỉ cần 'code')
-            query_params = parse_qs(parsed_url.query)
-            gift_codes = query_params.get("code", [])
-            gift_code = gift_codes[0].strip() if gift_codes else ""
-            
-            if not gift_code:
-                self.send_error_response(400, "Thiếu tham số 'code' bắt buộc.")
-                return
-            
-            self.process_redeem(gift_code)
-        else:
-            self.send_error_response(404, "Endpoint not found. Use GET or POST to /redeem")
-
     def do_POST(self):
-        parsed_url = urlparse(self.path)
-        if parsed_url.path == '/redeem':
-            # Đọc Body JSON của POST request
+        if self.path == '/webhook':
+            # Kiểm tra mã bí mật (SECRET_TOKEN) nếu được cấu hình
+            if SECRET_TOKEN and SECRET_TOKEN != "chuoi_mat_khau_tu_dat_cua_ban":
+                req_secret = self.headers.get("X-Bot-Api-Secret-Token")
+                if req_secret != SECRET_TOKEN:
+                    self.send_response(403)
+                    self.end_headers()
+                    self.wfile.write(b"Forbidden: Invalid X-Bot-Api-Secret-Token")
+                    return
+
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length) if content_length > 0 else b'{}'
             
             try:
-                params = json.loads(post_data.decode('utf-8'))
+                data = json.loads(post_data.decode('utf-8'))
             except Exception:
-                params = {}
-
-            gift_code = params.get("code", "")
-            if isinstance(gift_code, str):
-                gift_code = gift_code.strip()
-            else:
-                gift_code = ""
-            
-            if not gift_code:
-                self.send_error_response(400, "Thiếu tham số 'code' bắt buộc.")
-                return
-            
-            self.process_redeem(gift_code)
-        else:
-            self.send_error_response(404, "Endpoint not found. Use GET or POST to /redeem")
-
-    def process_redeem(self, gift_code):
-        role_ids = []
-        if SHEET_URLS:
-            for s_url in SHEET_URLS:
-                s_url = str(s_url).strip()
-                if not s_url:
-                    continue
-                print(f"\n[+] Đang tải dữ liệu từ Google Sheet: {s_url}...")
-                try:
-                    roles_from_sheet = get_google_sheet_roles(s_url)
-                    role_ids.extend(roles_from_sheet)
-                except Exception as e:
-                    self.send_error_response(500, f"Lỗi tải Google Sheet ({s_url}): {str(e)}")
-                    return
-        else:
-            excel_path = "idacc.xlsx"
-            if not os.path.exists(excel_path):
-                self.send_error_response(404, f"Không tìm thấy file Excel: {excel_path} và không cấu hình SHEET_URLS")
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"Bad Request: Invalid JSON")
                 return
 
-            print(f"\n[+] Đang đọc dữ liệu từ file Excel cục bộ: {excel_path}...")
-            try:
-                wb = openpyxl.load_workbook(excel_path, data_only=True, read_only=True)
-                sheet = wb.active
-                for row in sheet.iter_rows(values_only=True):
-                    if len(row) >= 2:
-                        val = row[1]  # Cột B
-                        if val is not None:
-                            val_str = str(val).strip()
-                            if val_str:
-                                role_ids.append(val_str)
-            except Exception as e:
-                self.send_error_response(500, f"Lỗi đọc file Excel: {str(e)}")
-                return
-
-        # Loại bỏ trùng lặp nếu trùng roleId giữa các sheet hoặc dòng
-        role_ids = list(dict.fromkeys(role_ids))
-
-        if not role_ids:
-            self.send_error_response(400, "Không tìm thấy Role ID nào có dữ liệu.")
-            return
-
-        print(f"\n[+] Bắt đầu xử lý {len(role_ids)} account(s) cho Giftcode: '{gift_code}'")
-
-        # 2. Gọi API coordination redeem
-        api_url = "https://vgrapi-sea.vnggames.com/coordinator/api/v1/code/redeem"
-        headers = {
-            "x-client-region": "VN",
-            "Content-Type": "application/json"
-        }
-
-        success_list = []
-        failed_list = []
-
-        for idx, role_id in enumerate(role_ids, 1):
-            print(f"    [{idx}/{len(role_ids)}] Đang redeem cho {role_id}...")
+            event_name = data.get("event_name")
             
-            payload = {
-                "serverId": str(SERVER_ID),
-                "gameCode": str(GAME_CODE),
-                "roleId": role_id,
-                "roleName": role_id,
-                "code": gift_code
-            }
-
-            try:
-                response = requests.post(api_url, headers=headers, json=payload, timeout=10)
-                status_code = response.status_code
+            # Chỉ xử lý khi người dùng nhắn tin text vào Bot Zalo
+            if event_name == "user_send_text":
+                sender_id = data.get("sender", {}).get("id")
+                message_text = data.get("message", {}).get("text", "").strip()
                 
-                # Thử giải mã JSON phản hồi (cho cả 200 và các mã lỗi như 400)
-                try:
-                    res_json = response.json()
-                    error_code = res_json.get("errorCode")
-                    error_msg = res_json.get("message") or res_json.get("description")
-                    
-                    if status_code == 200 and error_code == 1:
-                        success_list.append({
-                            "roleId": role_id
-                        })
-                        print(f"        -> THÀNH CÔNG: {error_msg or 'Success'}")
-                    else:
-                        # Thất bại từ API VNG
-                        msg = error_msg or f"Lỗi code {error_code}"
-                        failed_list.append({
-                            "roleId": role_id,
-                            "error": msg
-                        })
-                        print(f"        -> THẤT BẠI: {msg}")
-                except Exception:
-                    # Trường hợp phản hồi không phải JSON
-                    if status_code == 200:
-                        err_msg = f"Phản hồi không phải JSON: {response.text}"
-                    else:
-                        err_msg = f"HTTP Status {status_code}: {response.text}"
-                        
-                    failed_list.append({
-                        "roleId": role_id,
-                        "error": err_msg
-                    })
-                    print(f"        -> THẤT BẠI: {err_msg}")
+                # Cú pháp hỗ trợ: "/code <MÃ_CODE>" hoặc "/redeem <MÃ_CODE>"
+                gift_code = ""
+                if message_text.lower().startswith("/code "):
+                    gift_code = message_text[6:].strip()
+                elif message_text.lower().startswith("/redeem "):
+                    gift_code = message_text[8:].strip()
 
-            except Exception as e:
-                err_msg = f"Lỗi kết nối API: {str(e)}"
-                failed_list.append({
-                    "roleId": role_id,
-                    "error": err_msg
-                })
-                print(f"        -> LỖI KẾT NỐI: {str(e)}")
+                if gift_code and sender_id:
+                    # Chạy xử lý trong luồng riêng để trả về 200 OK cho Zalo ngay lập tức (< 2 giây)
+                    threading.Thread(
+                        target=run_redeem_in_background,
+                        args=(sender_id, gift_code),
+                        daemon=True
+                    ).start()
+            
+            # Luôn trả về 200 OK thành công cho Zalo Server
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok"}).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"Not Found")
 
-            # Tránh rate-limiting
-            time.sleep(0.5)
 
-        # 3. Trả về kết quả JSON
-        response_payload = {
-            "totalSuccess": len(success_list),
-            "totalFailed": len(failed_list),
-            "success": success_list,
-            "failed": failed_list
-        }
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(json.dumps(response_payload, ensure_ascii=False).encode('utf-8'))
-        print(f"[+] Hoàn thành gọi API. Thành công: {len(success_list)} | Thất bại: {len(failed_list)}\n")
-
-    def send_error_response(self, status_code, message):
-        self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.end_headers()
-        response = {"error": message}
-        self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
-
-def run_server(port=5000):
-    server_address = ('', port)
-    httpd = HTTPServer(server_address, RedeemRequestHandler)
+def run_server():
+    server_address = ('', PORT)
+    httpd = HTTPServer(server_address, ZaloWebhookRequestHandler)
     print("=" * 60)
-    print(f"Server API đang chạy tại: http://localhost:{port}/redeem")
-    print(f"Bạn có thể mở Postman và gọi GET hoặc POST tới endpoint này.")
+    print(f"Server Webhook Zalo Bot đang chạy tại cổng: {PORT}")
+    print(f"Đường dẫn Webhook: http://localhost:{PORT}/webhook")
     print("=" * 60)
-    print("Nhấn Ctrl + C để dừng Server.\n")
+    print("Nhấn Ctrl + C để tắt Server.\n")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
