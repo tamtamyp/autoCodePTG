@@ -5,6 +5,7 @@ import json
 import re
 import csv
 import threading
+import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 import openpyxl
@@ -14,11 +15,20 @@ try:
 except AttributeError:
     pass
 
+# Cấu hình logging để in ra console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
 # ==============================================================================
 # CẤU HÌNH ZALO BOT & VNG REDEEM
 # ==============================================================================
-BOT_TOKEN = "1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex"      # Token nhận từ bot.zaloplatforms.com
-SECRET_TOKEN = "abc-xyz-123" # Secret token cấu hình khi setWebhook (tùy chọn)
+BOT_TOKEN = "ĐIỀN_TOKEN_ZALO_BOT_CỦA_BẠN"      # Token nhận từ bot.zaloplatforms.com
+SECRET_TOKEN = "chuoi_mat_khau_tu_dat_cua_ban" # Secret token cấu hình khi setWebhook (tùy chọn)
 
 SERVER_ID = "2"
 GAME_CODE = "661"
@@ -67,7 +77,7 @@ def get_google_sheet_roles(sheet_url):
 def send_zalo_message(chat_id, text):
     """Gửi tin nhắn văn bản phản hồi lại người dùng thông qua API Zalo Bot Platform"""
     if not BOT_TOKEN or "ĐIỀN_TOKEN" in BOT_TOKEN:
-        print(f"\n[Zalo Bot MOCK -> Gửi tới {chat_id}]:\n{text}\n")
+        logging.info(f"[Zalo Bot MOCK -> Gửi tới {chat_id}]: {text}")
         return
         
     url = f"https://bot-api.zaloplatforms.com/bot{BOT_TOKEN}/sendMessage"
@@ -80,9 +90,9 @@ def send_zalo_message(chat_id, text):
     }
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=10)
-        print(f"[Zalo Bot] Phản hồi gửi tin nhắn: {res.status_code} - {res.text}")
+        logging.info(f"[Zalo Bot] Phản hồi gửi tin nhắn: {res.status_code} - {res.text}")
     except Exception as e:
-        print(f"[Zalo Bot] Lỗi khi gửi tin nhắn Zalo: {e}")
+        logging.error(f"[Zalo Bot] Lỗi khi gửi tin nhắn Zalo: {e}")
 
 
 def run_redeem_in_background(chat_id, gift_code):
@@ -171,7 +181,8 @@ def run_redeem_in_background(chat_id, gift_code):
 
 class ZaloWebhookRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        print(f"[HTTP] {self.address_string()} - - [{self.log_date_time_string()}] {format%args}")
+        # Log request thông qua logger thay vì print trực tiếp
+        logging.info(f"[HTTP] {self.address_string()} - - {format%args}")
 
     def do_POST(self):
         if self.path == '/webhook':
@@ -229,17 +240,17 @@ class ZaloWebhookRequestHandler(BaseHTTPRequestHandler):
 def run_server():
     server_address = ('', PORT)
     httpd = HTTPServer(server_address, ZaloWebhookRequestHandler)
-    print("=" * 60)
-    print(f"Server Webhook Zalo Bot đang chạy tại cổng: {PORT}")
-    print(f"Đường dẫn Webhook: http://localhost:{PORT}/webhook")
-    print("=" * 60)
-    print("Nhấn Ctrl + C để tắt Server.\n")
+    logging.info("=" * 60)
+    logging.info(f"Server Webhook Zalo Bot đang chạy tại cổng: {PORT}")
+    logging.info(f"Đường dẫn Webhook: http://localhost:{PORT}/webhook")
+    logging.info("=" * 60)
+    logging.info("Nhấn Ctrl + C để tắt Server.\n")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n[-] Đang tắt Server...")
+        logging.info("Đang tắt Server...")
         httpd.server_close()
-        print("[+] Đã tắt Server.")
+        logging.info("Đã tắt Server.")
 
 if __name__ == "__main__":
     run_server()
