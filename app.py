@@ -26,19 +26,62 @@ logging.basicConfig(
 )
 
 # ==============================================================================
-# CẤU HÌNH ZALO BOT & VNG REDEEM
+# CẤU HÌNH MẶC ĐỊNH (Fallback nếu không tìm thấy config.txt)
 # ==============================================================================
-BOT_TOKEN = "1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex"      # Token nhận từ bot.zaloplatforms.com
-SECRET_TOKEN = "abc-xyz-123" # Secret token cấu hình khi setWebhook (tùy chọn)
-CHAT_ID = "c40c79a60df0e4aebde1"               # ID Zalo mặc định nhận tin nhắn báo cáo kết quả
+DEFAULT_CONFIG = {
+    "BOT_TOKEN": "1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex",
+    "SECRET_TOKEN": "abc-xyz-123",
+    "CHAT_ID": "c40c79a60df0e4aebde1",
+    "SERVER_ID": "2",
+    "GAME_CODE": "661",
+    "SHEET_URLS": ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"]
+}
 
-SERVER_ID = "2"
-GAME_CODE = "661"
-SHEET_URLS = ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"]
-# SHEET_URLS = [
-#     "https://docs.google.com/spreadsheets/d/1wIL_pO9wdZjq5TX4S-e_zYgo0_Zc3O0_EKcVUWlDmz4/edit?usp=sharing"
-#     ,"https://docs.google.com/spreadsheets/d/1s-K2MO92uzwkKSk7dZDo4vR6K7XicRvfIp63Vo7c-gA/edit?usp=sharing"
-# ]
+def load_config(filename="config.txt"):
+    config = DEFAULT_CONFIG.copy()
+    
+    # Tìm đường dẫn tuyệt đối cạnh file chạy (Hỗ trợ PyInstaller build ra file exe)
+    base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+    config_path = os.path.join(base_path, filename)
+    
+    # Fallback về thư mục hiện tại nếu chạy dạng script thường
+    if not os.path.exists(config_path):
+        config_path = filename
+
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip()
+                        if key in config:
+                            if key == "SHEET_URLS":
+                                config[key] = [url.strip() for url in val.split(",") if url.strip()]
+                            else:
+                                config[key] = val
+            logging.info(f"Đã tải cấu hình thành công từ: {config_path}")
+        except Exception as e:
+            logging.error(f"Lỗi khi đọc file cấu hình {filename}: {e}")
+    else:
+        logging.warning(f"Không tìm thấy file cấu hình {filename}. Sử dụng cấu hình mặc định.")
+        
+    return config
+
+# Load cấu hình thực tế
+CONFIG = load_config("config.txt")
+
+BOT_TOKEN = CONFIG["BOT_TOKEN"]
+SECRET_TOKEN = CONFIG["SECRET_TOKEN"]
+CHAT_ID = CONFIG["CHAT_ID"]
+SERVER_ID = CONFIG["SERVER_ID"]
+GAME_CODE = CONFIG["GAME_CODE"]
+SHEET_URLS = CONFIG["SHEET_URLS"]
+
 PORT = int(os.environ.get("PORT", 5000))
 # ==============================================================================
 
