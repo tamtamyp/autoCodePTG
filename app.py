@@ -30,6 +30,7 @@ logging.basicConfig(
 # ==============================================================================
 BOT_TOKEN = "1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex"      # Token nhận từ bot.zaloplatforms.com
 SECRET_TOKEN = "abc-xyz-123" # Secret token cấu hình khi setWebhook (tùy chọn)
+CHAT_ID = "c40c79a60df0e4aebde1"               # ID Zalo mặc định nhận tin nhắn báo cáo kết quả
 
 SERVER_ID = "2"
 GAME_CODE = "661"
@@ -252,8 +253,9 @@ class CombinedRequestHandler(BaseHTTPRequestHandler):
             logging.info(f"Nhận webhook Zalo: {json.dumps(data, ensure_ascii=False)}")
 
             event_name = data.get("event_name")
-            if event_name == "user_send_text":
-                sender_id = data.get("sender", {}).get("id")
+            
+            # Hỗ trợ cả 2 event tin nhắn của Zalo
+            if event_name in ["user_send_text", "message.text.received"]:
                 message_text = data.get("message", {}).get("text", "").strip()
                 
                 # Cú pháp: !code <MÃ_CODE>
@@ -261,16 +263,22 @@ class CombinedRequestHandler(BaseHTTPRequestHandler):
                 if message_text.lower().startswith("!code "):
                     gift_code = message_text[6:].strip()
 
-                if gift_code and sender_id:
-                    # Gửi phản hồi ngay lập tức để không bị timeout 2s
-                    send_zalo_message(sender_id, f"Đang tiến hành redeem code '{gift_code}'. Vui lòng đợi kết quả...")
+                if gift_code:
+                    # Ưu tiên lấy CHAT_ID cấu hình cứng, nếu không thì lấy ID người gửi tự động từ payload
+                    target_chat_id = CHAT_ID
+                    if not target_chat_id or "ĐIỀN_CHAT_ID" in target_chat_id:
+                        target_chat_id = data.get("sender", {}).get("id") or data.get("message", {}).get("chat", {}).get("id")
                     
-                    # Chạy luồng ngầm xử lý nạp code
-                    threading.Thread(
-                        target=run_redeem_in_background,
-                        args=(sender_id, gift_code),
-                        daemon=True
-                    ).start()
+                    if target_chat_id:
+                        # Gửi phản hồi ngay lập tức đến CHAT_ID để không bị timeout 2s
+                        send_zalo_message(target_chat_id, f"Đang tiến hành redeem code '{gift_code}'. Vui lòng đợi kết quả...")
+                        
+                        # Chạy luồng ngầm xử lý nạp code
+                        threading.Thread(
+                            target=run_redeem_in_background,
+                            args=(target_chat_id, gift_code),
+                            daemon=True
+                        ).start()
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
