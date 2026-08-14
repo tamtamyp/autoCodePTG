@@ -22,10 +22,11 @@ SECRET_TOKEN = "abc-xyz-123" # Secret token cấu hình khi setWebhook (tùy ch�
 
 SERVER_ID = "2"
 GAME_CODE = "661"
-SHEET_URLS = [
-    "https://docs.google.com/spreadsheets/d/1wIL_pO9wdZjq5TX4S-e_zYgo0_Zc3O0_EKcVUWlDmz4/edit?usp=sharing",
-    "https://docs.google.com/spreadsheets/d/1s-K2MO92uzwkKSk7dZDo4vR6K7XicRvfIp63Vo7c-gA/edit?usp=sharing"
-]
+SHEET_URLS = ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"]
+# SHEET_URLS = [
+#     "https://docs.google.com/spreadsheets/d/1wIL_pO9wdZjq5TX4S-e_zYgo0_Zc3O0_EKcVUWlDmz4/edit?usp=sharing"
+#     ,"https://docs.google.com/spreadsheets/d/1s-K2MO92uzwkKSk7dZDo4vR6K7XicRvfIp63Vo7c-gA/edit?usp=sharing"
+# ]
 PORT = int(os.environ.get("PORT", 5000))
 # ==============================================================================
 
