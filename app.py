@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 
 # ==============================================================================
-# CẤU HÌNH MẶC ĐỊNH (Fallback nếu không tìm thấy config.txt)
+# CẤU HÌNH MẶC ĐỊNH (Fallback nếu không đọc được từ Google Sheet)
 # ==============================================================================
 DEFAULT_CONFIG = {
     "BOT_TOKEN": "1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex",
@@ -37,50 +37,86 @@ DEFAULT_CONFIG = {
     "SHEET_URLS": ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"]
 }
 
-def load_config(filename="config.txt"):
-    config = DEFAULT_CONFIG.copy()
-    
-    # Tìm đường dẫn tuyệt đối cạnh file chạy (Hỗ trợ PyInstaller build ra file exe)
-    base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
-    config_path = os.path.join(base_path, filename)
-    
-    # Fallback về thư mục hiện tại nếu chạy dạng script thường
-    if not os.path.exists(config_path):
-        config_path = filename
+# Các biến cấu hình toàn cục
+BOT_TOKEN = DEFAULT_CONFIG["BOT_TOKEN"]
+SECRET_TOKEN = DEFAULT_CONFIG["SECRET_TOKEN"]
+CHAT_ID = DEFAULT_CONFIG["CHAT_ID"]
+SERVER_ID = DEFAULT_CONFIG["SERVER_ID"]
+SHEET_URLS = DEFAULT_CONFIG["SHEET_URLS"]
+GAME_CODE = DEFAULT_CONFIG["GAME_CODE"]
 
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "=" in line:
-                        key, val = line.split("=", 1)
-                        key = key.strip()
-                        val = val.strip()
-                        if key in config:
-                            if key == "SHEET_URLS":
-                                config[key] = [url.strip() for url in val.split(",") if url.strip()]
-                            else:
-                                config[key] = val
-            logging.info(f"Đã tải cấu hình thành công từ: {config_path}")
-        except Exception as e:
-            logging.error(f"Lỗi khi đọc file cấu hình {filename}: {e}")
-    else:
-        logging.warning(f"Không tìm thấy file cấu hình {filename}. Sử dụng cấu hình mặc định.")
+# Cấu hình mặc định của URL chứa file config
+DEFAULT_CONFIG_SHEET_URL = "https://docs.google.com/spreadsheets/d/1uu_lE1QD5tB1HgJ5j3HtNeVdoMyEcAkvGeV3137264U/edit?usp=sharing"
+
+def get_config_sheet_url():
+    # 1. Ưu tiên đọc từ biến môi trường (dành cho Render)
+    url = os.environ.get("CONFIG_SHEET_URL")
+    if url:
+        return url.strip()
+            
+    # 2. Mặc định
+    return DEFAULT_CONFIG_SHEET_URL
+
+def load_config_from_google_sheet(sheet_url):
+    config = DEFAULT_CONFIG.copy()
+    if not sheet_url:
+        return config
+
+    try:
+        sheet_id_match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url)
+        if not sheet_id_match:
+            logging.error(f"URL Google Sheet cấu hình không đúng định dạng: {sheet_url}")
+            return config
+        spreadsheet_id = sheet_id_match.group(1)
+        
+        gid = "0"
+        gid_match = re.search(r"gid=([0-9]+)", sheet_url)
+        if gid_match:
+            gid = gid_match.group(1)
+            
+        csv_url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv&gid={gid}"
+        
+        response = requests.get(csv_url, timeout=10)
+        if response.status_code != 200:
+            logging.error(f"Không thể tải Google Sheet cấu hình. Status code: {response.status_code}")
+            return config
+            
+        content = response.content.decode('utf-8')
+        csv_reader = csv.reader(content.splitlines())
+        
+        for row in csv_reader:
+            if len(row) >= 2:
+                key = str(row[0]).strip()
+                val = str(row[1]).strip()
+                if key in config:
+                    if key == "SHEET_URLS":
+                        config[key] = [url.strip() for url in val.split(",") if url.strip()]
+                    else:
+                        config[key] = val
+        logging.info("Đã tải cấu hình thành công từ Google Sheet!")
+    except Exception as e:
+        logging.error(f"Lỗi khi đọc cấu hình từ Google Sheet: {e}")
         
     return config
 
-# Load cấu hình thực tế
-CONFIG = load_config("config.txt")
+def reload_config():
+    global BOT_TOKEN, SECRET_TOKEN, CHAT_ID, SERVER_ID, GAME_CODE, SHEET_URLS
+    url = get_config_sheet_url()
+    logging.info(f"Đang tải cấu hình động từ Sheet URL: {url}...")
+    config = load_config_from_google_sheet(url)
+    
+    BOT_TOKEN = config["BOT_TOKEN"]
+    SECRET_TOKEN = config["SECRET_TOKEN"]
+    CHAT_ID = config["CHAT_ID"]
+    SERVER_ID = config["SERVER_ID"]
+    GAME_CODE = config["GAME_CODE"]
+    SHEET_URLS = config["SHEET_URLS"]
 
-BOT_TOKEN = CONFIG["BOT_TOKEN"]
-SECRET_TOKEN = CONFIG["SECRET_TOKEN"]
-CHAT_ID = CONFIG["CHAT_ID"]
-SERVER_ID = CONFIG["SERVER_ID"]
-GAME_CODE = CONFIG["GAME_CODE"]
-SHEET_URLS = CONFIG["SHEET_URLS"]
+# Khởi động tải cấu hình lần đầu
+try:
+    reload_config()
+except Exception as e:
+    logging.error(f"Lỗi tải cấu hình khởi động: {e}")
 
 PORT = int(os.environ.get("PORT", 5000))
 # ==============================================================================
@@ -239,6 +275,11 @@ class CombinedRequestHandler(BaseHTTPRequestHandler):
         logging.info(f"[HTTP] {self.address_string()} - - {format%args}")
 
     def do_GET(self):
+        try:
+            reload_config()
+        except Exception as e:
+            logging.error(f"Lỗi tự động tải cấu hình: {e}")
+
         parsed_url = urlparse(self.path)
         
         # 1. Endpoint / phục vụ Health Check của Render
@@ -273,6 +314,11 @@ class CombinedRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        try:
+            reload_config()
+        except Exception as e:
+            logging.error(f"Lỗi tự động tải cấu hình: {e}")
+
         parsed_url = urlparse(self.path)
         
         # 3. Endpoint /webhook xử lý tin nhắn từ Zalo Bot
