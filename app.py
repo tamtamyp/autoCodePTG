@@ -34,7 +34,8 @@ DEFAULT_CONFIG = {
     "CHAT_ID": "c40c79a60df0e4aebde1",
     "SERVER_ID": "2",
     "GAME_CODE": "661",
-    "SHEET_URLS": ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"]
+    "SHEET_URLS": ["https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing"],
+    "API_DELAY": "1.5"
 }
 
 # Các biến cấu hình toàn cục
@@ -44,6 +45,7 @@ CHAT_ID = DEFAULT_CONFIG["CHAT_ID"]
 SERVER_ID = DEFAULT_CONFIG["SERVER_ID"]
 SHEET_URLS = DEFAULT_CONFIG["SHEET_URLS"]
 GAME_CODE = DEFAULT_CONFIG["GAME_CODE"]
+API_DELAY = float(DEFAULT_CONFIG["API_DELAY"])
 
 # Cấu hình mặc định của URL chứa file config
 DEFAULT_CONFIG_SHEET_URL = "https://docs.google.com/spreadsheets/d/1uu_lE1QD5tB1HgJ5j3HtNeVdoMyEcAkvGeV3137264U/edit?usp=sharing"
@@ -100,7 +102,7 @@ def load_config_from_google_sheet(sheet_url):
     return config
 
 def reload_config():
-    global BOT_TOKEN, SECRET_TOKEN, CHAT_ID, SERVER_ID, GAME_CODE, SHEET_URLS
+    global BOT_TOKEN, SECRET_TOKEN, CHAT_ID, SERVER_ID, GAME_CODE, SHEET_URLS, API_DELAY
     url = get_config_sheet_url()
     logging.info(f"Đang tải cấu hình động từ Sheet URL: {url}...")
     config = load_config_from_google_sheet(url)
@@ -111,6 +113,10 @@ def reload_config():
     SERVER_ID = config["SERVER_ID"]
     GAME_CODE = config["GAME_CODE"]
     SHEET_URLS = config["SHEET_URLS"]
+    try:
+        API_DELAY = float(config.get("API_DELAY", 1.5))
+    except Exception:
+        API_DELAY = 1.5
 
 # Khởi động tải cấu hình lần đầu
 try:
@@ -176,6 +182,33 @@ def send_zalo_message(chat_id, text):
         logging.error(f"[Zalo Bot] Lỗi khi gửi tin nhắn Zalo: {e}")
 
 
+def send_zalo_message_chunked(chat_id, text):
+    """Chia nhỏ tin nhắn gửi đi nếu vượt quá giới hạn 2000 ký tự của Zalo"""
+    MAX_LENGTH = 1800
+    if len(text) <= MAX_LENGTH:
+        send_zalo_message(chat_id, text)
+        return
+
+    # Tách tin nhắn theo từng dòng
+    lines = text.split('\n')
+    current_chunk = []
+    current_length = 0
+
+    for line in lines:
+        # Nếu cộng thêm dòng này vượt quá giới hạn, thực hiện gửi chunk hiện tại
+        if current_length + len(line) + 1 > MAX_LENGTH:
+            if current_chunk:
+                send_zalo_message(chat_id, '\n'.join(current_chunk))
+            current_chunk = [line]
+            current_length = len(line)
+        else:
+            current_chunk.append(line)
+            current_length += len(line) + 1
+
+    if current_chunk:
+        send_zalo_message(chat_id, '\n'.join(current_chunk))
+
+
 def execute_redeem_logic(gift_code):
     """Thực hiện luồng quét sheet và nạp code cho tất cả role ID (trả về kết quả thô)"""
     role_ids = []
@@ -236,7 +269,7 @@ def execute_redeem_logic(gift_code):
             failed_list.append({"roleId": role_id, "error": f"Lỗi kết nối API: {str(e)}"})
             logging.error(f"    -> LỖI KẾT NỐI: {str(e)}")
 
-        time.sleep(0.5)
+        time.sleep(API_DELAY)
 
     return success_list, failed_list
 
@@ -267,7 +300,7 @@ def run_redeem_in_background(chat_id, gift_code):
         for item in failed_list:
             summary_text += f"- {item['roleId']}: {item['error']}\n"
             
-    send_zalo_message(chat_id, summary_text)
+    send_zalo_message_chunked(chat_id, summary_text)
 
 
 class CombinedRequestHandler(BaseHTTPRequestHandler):
