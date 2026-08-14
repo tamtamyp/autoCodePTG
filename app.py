@@ -240,9 +240,12 @@ class ZaloWebhookRequestHandler(BaseHTTPRequestHandler):
 def run_server():
     server_address = ('', PORT)
     httpd = HTTPServer(server_address, ZaloWebhookRequestHandler)
+    external_url = os.environ.get("RENDER_EXTERNAL_URL")
+    webhook_url = f"{external_url}/webhook" if external_url else f"http://localhost:{PORT}/webhook"
+    
     logging.info("=" * 60)
     logging.info(f"Server Webhook Zalo Bot đang chạy tại cổng: {PORT}")
-    logging.info(f"Đường dẫn Webhook: http://localhost:{PORT}/webhook")
+    logging.info(f"Đường dẫn Webhook: {webhook_url}")
     logging.info("=" * 60)
     logging.info("Nhấn Ctrl + C để tắt Server.\n")
     try:
