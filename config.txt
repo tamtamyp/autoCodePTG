@@ -1,19 +1,1 @@
-# ==============================================================================
-# CẤU HÌNH ZALO BOT & VNG REDEEM
-# ==============================================================================
 
-# Token nhận từ bot.zaloplatforms.com
-BOT_TOKEN=1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex
-
-# Secret token cấu hình khi setWebhook (tùy chọn)
-SECRET_TOKEN=abc-xyz-123
-
-# ID Zalo nhận tin nhắn báo cáo kết quả mặc định
-CHAT_ID=c40c79a60df0e4aebde1
-
-# Thông tin Game
-SERVER_ID=2
-GAME_CODE=661
-
-# Danh sách URL Google Sheet của bạn (phân tách nhau bằng dấu phẩy)
-SHEET_URLS=https://docs.google.com/spreadsheets/d/1mdv1O31HGALyDTeZhmjn0aLNmjOmpR_3fO6RcudTerU/edit?usp=sharing
