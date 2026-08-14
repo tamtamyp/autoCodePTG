@@ -28,8 +28,8 @@ logging.basicConfig(
 # ==============================================================================
 # CẤU HÌNH ZALO BOT & VNG REDEEM
 # ==============================================================================
-BOT_TOKEN = "ĐIỀN_TOKEN_ZALO_BOT_CỦA_BẠN"      # Token nhận từ bot.zaloplatforms.com
-SECRET_TOKEN = "chuoi_mat_khau_tu_dat_cua_ban" # Secret token cấu hình khi setWebhook (tùy chọn)
+BOT_TOKEN = "1281608028214813212:HNNRzFXskRXjEFtrHKXDqWeOauFfSkuPBVNQgoIYUlFFlikojFgxnopHrXicjZex"      # Token nhận từ bot.zaloplatforms.com
+SECRET_TOKEN = "abc-xyz-123" # Secret token cấu hình khi setWebhook (tùy chọn)
 
 SERVER_ID = "2"
 GAME_CODE = "661"
@@ -248,6 +248,8 @@ class CombinedRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(400)
                 self.end_headers()
                 return
+
+            logging.info(f"Nhận webhook Zalo: {json.dumps(data, ensure_ascii=False)}")
 
             event_name = data.get("event_name")
             if event_name == "user_send_text":
